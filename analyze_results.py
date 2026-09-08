@@ -451,6 +451,64 @@ def plot_comment_breakdown(comment_result, out_dir):
 # ===========================================================================
 
 
+def paired_comparison_notes(pairs):
+    """Plain-language glossary for the t/p/dz/W/p columns, plus a
+    data-driven caveat about what's actually trustworthy at the observed
+    sample size. Regenerated from `pairs` every run so the caveat (e.g. the
+    Wilcoxon test's best-case p-value) always matches the current n."""
+    lines = []
+    lines.append("**What the columns mean:**\n")
+    lines.append(
+        "- **t / p (paired t)** - the paired t-test. `t` is the mean "
+        "difference between conditions divided by how much that difference "
+        "varies across participants; `p` is the chance of seeing a "
+        "difference this large if the two conditions were truly no "
+        "different. p < 0.05 is the conventional 'significant' cutoff.")
+    lines.append(
+        "- **Cohen's dz** - the paired-t effect size (mean difference / SD "
+        "of the differences), in standardized units independent of sample "
+        "size. Rough guide: ~0.2 small, ~0.5 medium, ~0.8 large.")
+    lines.append(
+        "- **W / p (Wilcoxon)** - the Wilcoxon signed-rank test, a "
+        "non-parametric counterpart to the paired t-test that ranks the "
+        "differences instead of assuming they're normally distributed. `W` "
+        "is the rank-sum statistic; `p (Wilcoxon)` is its significance, "
+        "interpreted the same way as the t-test p-value.")
+
+    if pairs.empty or "n_pairs" not in pairs.columns:
+        return "\n".join(lines) + "\n"
+
+    n_pairs_seen = sorted(int(n) for n in pairs["n_pairs"].dropna().unique() if n > 0)
+    min_n = min(n_pairs_seen) if n_pairs_seen else 0
+    has_degenerate_t = np.isinf(pairs.get("t", pd.Series(dtype=float))).any()
+
+    if min_n and min_n < 8:
+        # Exact Wilcoxon signed-rank test on n non-tied pairs has 2^n
+        # possible sign patterns; the smallest two-sided p it can ever
+        # report is 2 / 2^n.
+        floor_p = 2 / (2 ** min_n)
+        lines.append("")
+        lines.append(
+            f"**Caveat at this sample size:** with only n = {min_n} paired "
+            f"observation(s) for some measures, the Wilcoxon test cannot "
+            f"report a p-value below about {floor_p:.2f} no matter how "
+            f"consistent the data are, so its p-values here should not be "
+            f"read as 'no effect'. p-values in general are unstable at "
+            f"this n; the effect sizes (Cohen's dz) and the raw "
+            f"means/medians in the descriptive table above are more "
+            f"informative than any p-value in this table. Treat this table "
+            f"as pilot-level evidence of what's worth testing with a "
+            f"larger sample, not as confirmed results.")
+    if has_degenerate_t:
+        lines.append(
+            "\n`t = inf`/`-inf` means every participant had the exact same "
+            "difference between conditions (zero variance), which breaks "
+            "the t-test formula (division by zero) - a degenerate case, "
+            "not a real result.")
+
+    return "\n".join(lines) + "\n"
+
+
 def write_markdown_summary(path, df, tlx_cols, custom_cols, desc, pairs, comment_result):
     conditions = sort_conditions(df["condition"].unique())
     n_participants = df["user_id"].nunique()
@@ -503,6 +561,7 @@ def write_markdown_summary(path, df, tlx_cols, custom_cols, desc, pairs, comment
                 f"{cell(r.get('p_ttest'), 3)} | {cell(r.get('cohens_dz'))} | "
                 f"{cell(r.get('W'))} | {cell(r.get('p_wilcoxon'), 3)} |")
         lines.append("")
+        lines.append(paired_comparison_notes(pairs))
 
     lines.append("## Torque-interpretation comment\n")
     lines.append(f"- Total rows: {comment_result['n_total_rows']}")

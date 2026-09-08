@@ -10,6 +10,12 @@
 #      for the six raw NASA-TLX subscales, the unweighted overall Raw-TLX
 #      score, and every custom Likert item (confidence, usefulness,
 #      naturalness) - broken down by condition.
+#      Note on tlx_performance: nasa-tlx.py collects it "higher = better"
+#      (Failure at 0, Perfect at 100) unlike the other five subscales, which
+#      are "higher = worse/more demanding". tlx_overall inverts performance
+#      (100 - value) before averaging so it stays a standard Raw-TLX workload
+#      score where higher = worse overall; the tlx_performance column itself
+#      is left in its collected (higher = better) direction everywhere else.
 #   2. Within-subject paired comparisons between conditions (paired t-test,
 #      Wilcoxon signed-rank test, Cohen's dz) for every measure above.
 #   3. Analysis of the free-text "did it feel like torque?" comment, which
@@ -26,8 +32,9 @@
 #   5. A Markdown summary (analysis_output/results_summary.md) with every
 #      number pre-formatted ("mean ± SD") for direct use in the paper.
 #
-# Requires: pandas, numpy, matplotlib. scipy is optional (enables the
-# paired-comparison tests and 95% CIs); without it those sections are
+# Requires: pandas, numpy, matplotlib, scipy - see requirements.txt. scipy
+# powers the paired-comparison tests (t-test, Wilcoxon) and 95% CIs; the
+# script exits with a clear message if it isn't installed.
 # skipped with a warning instead of crashing.
 #
 # Run:  python3 analyze_results.py [path/to/nasa-tlx-results.csv]
@@ -43,9 +50,10 @@ import pandas as pd
 
 try:
     from scipy import stats as sstats
-    HAVE_SCIPY = True
 except ImportError:
-    HAVE_SCIPY = False
+    sys.exit("scipy is required but not installed in this Python environment "
+              "(it powers the paired t-test/Wilcoxon/95% CI sections). "
+              "Run: pip install -r requirements.txt")
 
 # ===========================================================================
 # CONFIGURATION
@@ -116,7 +124,7 @@ TLX_SUBSCALE_NAMES = {
 }
 
 # ===========================================================================
-# Small stats helpers (so the script degrades gracefully without scipy)
+# Small stats helpers
 # ===========================================================================
 
 
@@ -130,16 +138,13 @@ def sem(series):
 
 def ci95_halfwidth(series):
     """Half-width of the 95% CI of the mean, using a t critical value.
-    NaN if fewer than 2 observations or scipy is unavailable."""
+    NaN if fewer than 2 observations."""
     series = pd.Series(series).dropna()
     n = len(series)
     if n < 2:
         return np.nan
     se = series.std(ddof=1) / np.sqrt(n)
-    if HAVE_SCIPY:
-        tcrit = sstats.t.ppf(1 - (1 - CONFIDENCE_LEVEL) / 2, df=n - 1)
-    else:
-        tcrit = 1.96  # large-sample normal approximation fallback
+    tcrit = sstats.t.ppf(1 - (1 - CONFIDENCE_LEVEL) / 2, df=n - 1)
     return tcrit * se
 
 
@@ -204,7 +209,14 @@ def load_data(csv_path):
     for col in tlx_cols + custom_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df["tlx_overall"] = df[tlx_cols].mean(axis=1)
+    # tlx_performance is collected "higher = better" (see nasa-tlx.py), the
+    # opposite direction from the other five subscales. Invert it just for
+    # this combined score so tlx_overall keeps the standard Raw-TLX meaning
+    # of "higher = worse/more overall workload".
+    overall_components = df[tlx_cols].copy()
+    if "tlx_performance" in overall_components.columns:
+        overall_components["tlx_performance"] = 100 - overall_components["tlx_performance"]
+    df["tlx_overall"] = overall_components.mean(axis=1)
 
     return df, tlx_cols, custom_cols
 
@@ -265,7 +277,7 @@ def paired_comparisons(df, measure_cols):
                     "n_pairs": n,
                     "mean_diff (a-b)": np.mean(a - b) if n else np.nan,
                 }
-                if n >= 2 and HAVE_SCIPY:
+                if n >= 2:
                     diff = a - b
                     dz = np.mean(diff) / np.std(diff, ddof=1) if np.std(diff, ddof=1) > 0 else np.nan
                     t_res = sstats.ttest_rel(a, b)
@@ -340,40 +352,6 @@ def comment_analysis(df):
 def color_map_for(conditions):
     ordered = sort_conditions(conditions)
     return {c: PALETTE[i % len(PALETTE)] for i, c in enumerate(ordered)}
-
-
-def plot_overall_tlx(df, out_dir, colors):
-    conditions = sort_conditions(df["condition"].unique())
-    means = [df.loc[df.condition == c, "tlx_overall"].mean() for c in conditions]
-    sems_ = [sem(df.loc[df.condition == c, "tlx_overall"]) for c in conditions]
-
-    fig, ax = plt.subplots(figsize=(5.5, 5))
-    x = np.arange(len(conditions))
-    ax.bar(x, means, width=0.5, color=[colors[c] for c in conditions],
-           yerr=sems_, capsize=4, zorder=3,
-           error_kw=dict(ecolor=INK_SECONDARY, elinewidth=1.2))
-
-    # Individual participants, connected across conditions they completed.
-    pivot = df.pivot_table(index="user_id", columns="condition",
-                            values="tlx_overall", aggfunc="mean")
-    pivot = pivot.reindex(columns=conditions)
-    for _, row in pivot.iterrows():
-        present = [(i, row[c]) for i, c in enumerate(conditions) if pd.notna(row[c])]
-        if len(present) >= 2:
-            xs, ys = zip(*present)
-            ax.plot(xs, ys, color=INK_MUTED, alpha=0.5, linewidth=1, zorder=2)
-        for i, y in present:
-            ax.scatter(i, y, color=INK_PRIMARY, s=20, zorder=4, alpha=0.75)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels([axis_label(c) for c in conditions])
-    ax.set_ylabel("Raw NASA-TLX overall score (0–100)")
-    ax.set_ylim(0, 100)
-    ax.set_title("Overall workload by condition")
-    style_axes(ax)
-    fig.tight_layout()
-    fig.savefig(out_dir / "overall_tlx.png", dpi=300)
-    plt.close(fig)
 
 
 def plot_subscales(df, tlx_cols, out_dir, colors):
@@ -512,10 +490,6 @@ def write_markdown_summary(path, df, tlx_cols, custom_cols, desc, pairs, comment
         lines.append("Not enough participants completed more than one "
                       "condition to run paired comparisons yet.\n")
     else:
-        if not HAVE_SCIPY:
-            lines.append("_scipy is not installed - t-test / Wilcoxon "
-                          "columns are omitted. Install with `pip install scipy` "
-                          "to enable significance testing._\n")
         lines.append("| Measure | A vs B | n pairs | Mean diff (A−B) | "
                       "t | p (paired t) | Cohen's dz | W | p (Wilcoxon) |")
         lines.append("|---|---|---|---|---|---|---|---|---|")
@@ -552,8 +526,6 @@ def write_markdown_summary(path, df, tlx_cols, custom_cols, desc, pairs, comment
     lines.append("")
 
     lines.append("## Figures\n")
-    lines.append("- `overall_tlx.png` - overall Raw-TLX score by condition "
-                 "(mean ± SEM, individual participants overlaid)")
     lines.append("- `subscales_by_condition.png` - the six Raw-TLX subscales by condition")
     if custom_cols:
         lines.append("- `custom_items_by_condition.png` - "
@@ -584,10 +556,6 @@ def main():
 
     print(f"Loaded {len(df)} rows, {df['user_id'].nunique()} participant(s), "
           f"conditions: {', '.join(sort_conditions(df['condition'].unique()))}\n")
-
-    if not HAVE_SCIPY:
-        print("NOTE: scipy is not installed - paired significance tests and "
-              "95% CIs will be skipped. Run `pip install scipy` to enable them.\n")
 
     desc = descriptive_table(df, measure_cols)
     desc.to_csv(out_dir / "descriptive_stats.csv", index=False)
@@ -621,7 +589,6 @@ def main():
         print("No Y/N responses yet.")
     print()
 
-    plot_overall_tlx(df, out_dir, colors)
     plot_subscales(df, tlx_cols, out_dir, colors)
     plot_custom_items(df, custom_cols, out_dir, colors)
     plot_comment_breakdown(comment_result, out_dir)

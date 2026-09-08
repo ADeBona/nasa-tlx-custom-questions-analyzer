@@ -42,8 +42,15 @@ tlx_texts = [
     "Frustration - How insecure, discouraged, irritated, stressed and annoyed were you?",
 ]
 
-tlx_left = ["Very Low", "Very Low", "Very Low", "Perfect", "Very Low", "Very Low"]
-tlx_right = ["Very High", "Very High", "Very High", "Failure", "Very High", "Very High"]
+tlx_left = ["Very Low", "Very Low", "Very Low", "Failure", "Very Low", "Very Low"]
+tlx_right = ["Very High", "Very High", "Very High", "Perfect", "Very High", "Very High"]
+# Note: Performance is intentionally the odd one out - higher = better here,
+# unlike the other five scales where higher = worse/more demanding. This is
+# the opposite of the classic NASA-TLX convention (which puts "Perfect" on
+# the low/left end so all six scales combine directly); we flipped it so the
+# slider and any plot of tlx_performance read intuitively ("more to the
+# right"/"taller bar" = better performance). analyze_results.py accounts for
+# this when computing the combined tlx_overall workload score.
 
 # --- Custom questions, appended below the TLX block -----------------------
 # Each entry: (column_id, question_text, left_anchor, right_anchor, n_points)

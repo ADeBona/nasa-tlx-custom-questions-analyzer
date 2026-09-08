@@ -24,4 +24,4 @@ Run `python3 analyze_results.py [path/to/nasa-tlx-results.csv]` to generate:
  4. Publication-ready figures (PNG, 300 dpi) written to `./analysis_output/`.
  5. A Markdown summary (`analysis_output/results_summary.md`) with every number pre-formatted for direct use in a paper.
 
-`scipy` is optional and enables the paired-comparison tests and 95% CIs; without it those sections are skipped with a warning instead of crashing.
+`scipy` is required (see `requirements.txt`) and powers the paired-comparison tests and 95% CIs.

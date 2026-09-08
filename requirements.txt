@@ -1,7 +1,8 @@
 matplotlib==3.11.1
 numpy==2.5.3
 pandas==3.0.5
+scipy==1.18.1
 
-# Optional: enables paired t-test/Wilcoxon/95% CI sections in analyze_results.py.
-# Without it, those sections are skipped with a warning instead of crashing.
-# scipy
+# scipy powers the paired t-test/Wilcoxon/95% CI sections in analyze_results.py.
+# analyze_results.py still runs without it (those sections are skipped with a
+# warning instead of crashing), but it's a real requirement here, not optional.
